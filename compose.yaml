@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all"]
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgmcp:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGMCP_TRANSPORT: http
+      PGMCP_LISTEN: 0.0.0.0:8080
+      PGMCP_AUTH_MODE: static
+      PGMCP_API_KEYS: dev-key
+      PGMCP_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+    ports:
+      - "8080:8080"
+
+  go:
+    image: golang:1.25
+    working_dir: /app
+    volumes:
+      - .:/app
