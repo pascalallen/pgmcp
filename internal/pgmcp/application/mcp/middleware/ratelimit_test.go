@@ -190,4 +190,56 @@ func TestRateLimit(t *testing.T) {
 		assert.True(t, isRateLimited(t, second))
 		assert.Equal(t, 1, downstream)
 	})
+
+	t.Run("rate limit refills at the configured per minute rate not per second", func(t *testing.T) {
+		now := time.Now()
+		limiter := newRateLimiter(60, 1, func() time.Time { return now })
+
+		downstream := 0
+		handler := limiter.middleware()(allowedHandler(&downstream))
+
+		first, err := handler(ctx, methodCallTool, principalRequest("u1"))
+		require.NoError(t, err)
+		require.False(t, isRateLimited(t, first))
+
+		now = now.Add(500 * time.Millisecond)
+
+		half, err := handler(ctx, methodCallTool, principalRequest("u1"))
+		require.NoError(t, err)
+		assert.True(t, isRateLimited(t, half), "60/minute is one token per second, so half a second is not enough")
+
+		now = now.Add(500 * time.Millisecond)
+
+		whole, err := handler(ctx, methodCallTool, principalRequest("u1"))
+		require.NoError(t, err)
+		assert.False(t, whole.(*mcp.CallToolResult).IsError, "a full second must have refilled exactly one token")
+		assert.Equal(t, 2, downstream)
+	})
+
+	t.Run("rate limit refills exactly thirty tokens in thirty seconds at sixty a minute", func(t *testing.T) {
+		now := time.Now()
+		limiter := newRateLimiter(60, 60, func() time.Time { return now })
+
+		downstream := 0
+		handler := limiter.middleware()(allowedHandler(&downstream))
+
+		for range 60 {
+			result, err := handler(ctx, methodCallTool, principalRequest("u1"))
+			require.NoError(t, err)
+			require.False(t, isRateLimited(t, result))
+		}
+
+		now = now.Add(30 * time.Second)
+
+		for i := range 30 {
+			result, err := handler(ctx, methodCallTool, principalRequest("u1"))
+			require.NoError(t, err)
+			require.False(t, isRateLimited(t, result), "refilled call %d should have been allowed", i+1)
+		}
+
+		exhausted, err := handler(ctx, methodCallTool, principalRequest("u1"))
+		require.NoError(t, err)
+		assert.True(t, isRateLimited(t, exhausted), "thirty seconds must refill thirty tokens, not more")
+		assert.Equal(t, 90, downstream)
+	})
 }
