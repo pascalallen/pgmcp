@@ -96,10 +96,12 @@ func seedLockFixture(t *testing.T, ctx context.Context) {
 // seedFixtures creates the schema the index and table health tests inspect: a
 // table with two identical indexes on the same column (one unused, one a
 // duplicate of the other) and half its rows deleted but not vacuumed, so it
-// carries dead tuples and index bloat. Autovacuum is disabled on the table so
-// that the dead tuples survive between runs. It is idempotent: the rows are
-// only written when the table is empty. No test may scan pgmcp_test.bloaty(pad):
-// doing so would move bloaty_pad_idx out of the unused listing for good.
+// carries dead tuples and index bloat, plus a table left with an invalid index
+// by a failed CREATE INDEX CONCURRENTLY. Autovacuum is disabled on the bloated
+// table so that the dead tuples survive between runs. It is idempotent: the
+// rows are only written when the table is empty. No test may scan
+// pgmcp_test.bloaty(pad): doing so would move bloaty_pad_idx out of the unused
+// listing for good.
 func seedFixtures(t *testing.T, db *sql.DB) {
 	t.Helper()
 
@@ -114,6 +116,7 @@ func seedFixtures(t *testing.T, db *sql.DB) {
 		"CREATE INDEX IF NOT EXISTS bloaty_pad_idx2 ON pgmcp_test.bloaty(pad)",
 		"CREATE TABLE IF NOT EXISTS pgmcp_test.lw_t(a int)",
 		"CREATE TABLE IF NOT EXISTS pgmcp_test.ro_probe(id serial primary key, val text)",
+		"CREATE TABLE IF NOT EXISTS pgmcp_test.inv_t(a int)",
 	} {
 		_, err := db.ExecContext(ctx, stmt)
 		require.NoError(t, err)
@@ -130,20 +133,62 @@ func seedFixtures(t *testing.T, db *sql.DB) {
 	var rows int64
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM pgmcp_test.bloaty").Scan(&rows))
 	if rows == 0 {
+		// The insert and the delete are one transaction: a run interrupted
+		// between them would otherwise leave 20000 live rows and no dead ones,
+		// and the next run would take this branch no more.
+		tx, err := db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+
 		// Every pad is distinct: identical values would be collapsed by btree
 		// deduplication into an index far too small to bloat measurably.
-		_, err := db.ExecContext(ctx,
+		_, err = tx.ExecContext(ctx,
 			"INSERT INTO pgmcp_test.bloaty(pad) SELECT repeat('a', 100) || g FROM generate_series(1, 20000) g")
 		require.NoError(t, err)
 
 		// Deleting without vacuuming leaves the dead tuples and the index
 		// entries pointing at them in place, which is the condition under test.
-		_, err = db.ExecContext(ctx, "DELETE FROM pgmcp_test.bloaty WHERE id % 2 = 0")
+		_, err = tx.ExecContext(ctx, "DELETE FROM pgmcp_test.bloaty WHERE id % 2 = 0")
 		require.NoError(t, err)
+
+		require.NoError(t, tx.Commit())
 	}
+
+	seedInvalidIndex(t, ctx, db)
 
 	// ANALYZE (never VACUUM) refreshes reltuples and the column statistics the
 	// bloat estimation queries read, without removing a single dead tuple.
 	_, err := db.ExecContext(ctx, "ANALYZE pgmcp_test.bloaty")
 	require.NoError(t, err)
+}
+
+// seedInvalidIndex leaves pgmcp_test.inv_t carrying an index the planner
+// refuses to use. There is no DDL that creates one directly: the only way is
+// to make CREATE UNIQUE INDEX CONCURRENTLY fail, which it does on duplicate
+// values, and which leaves the half-built index behind marked invalid. The
+// failure is the point, so the error it returns is expected rather than
+// asserted against.
+func seedInvalidIndex(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+
+	var exists bool
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'pgmcp_test' AND c.relname = 'inv_t_a_uidx'
+)`).Scan(&exists))
+
+	if !exists {
+		_, err := db.ExecContext(ctx,
+			"INSERT INTO pgmcp_test.inv_t(a) SELECT 1 FROM generate_series(1, 2) WHERE NOT EXISTS (SELECT 1 FROM pgmcp_test.inv_t)")
+		require.NoError(t, err)
+
+		// Expected to fail on the duplicate pair, and to leave the index.
+		_, _ = db.ExecContext(ctx, "CREATE UNIQUE INDEX CONCURRENTLY inv_t_a_uidx ON pgmcp_test.inv_t(a)")
+	}
+
+	var valid bool
+	require.NoError(t, db.QueryRowContext(ctx,
+		"SELECT indisvalid FROM pg_index WHERE indexrelid = 'pgmcp_test.inv_t_a_uidx'::regclass").Scan(&valid))
+	require.False(t, valid, "the fixture index must be invalid for the invalid-index path to be exercised")
 }

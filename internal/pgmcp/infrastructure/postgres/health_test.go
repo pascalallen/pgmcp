@@ -70,6 +70,23 @@ func TestStoreIndexHealth(t *testing.T) {
 		assert.Greater(t, bloated.BloatBytes, int64(0))
 	})
 
+	t.Run("index health reports an index a failed concurrent build left invalid", func(t *testing.T) {
+		store := testStore(t)
+		seedFixtures(t, rawDB(t))
+
+		result, err := store.IndexHealth(context.Background(), diagnostics.IndexHealthParams{Schema: "pgmcp_test"})
+
+		require.NoError(t, err)
+		require.Len(t, result.Invalid, 1)
+
+		invalid := result.Invalid[0]
+		assert.Equal(t, "pgmcp_test", invalid.Schema)
+		assert.Equal(t, "inv_t", invalid.Table)
+		assert.Equal(t, "inv_t_a_uidx", invalid.Index)
+		assert.Zero(t, invalid.Scans)
+		assert.Contains(t, invalid.Definition, "CREATE UNIQUE INDEX inv_t_a_uidx")
+	})
+
 	t.Run("index health scopes its findings to the requested schema", func(t *testing.T) {
 		store := testStore(t)
 		seedFixtures(t, rawDB(t))

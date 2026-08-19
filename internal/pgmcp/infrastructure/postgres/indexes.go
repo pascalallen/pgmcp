@@ -61,12 +61,15 @@ LIMIT 100`
 
 // invalidIndexesQuery lists indexes the planner refuses to use: a failed
 // CREATE INDEX CONCURRENTLY or REINDEX CONCURRENTLY leaves one behind, still
-// costing writes and disk while serving nothing.
+// costing writes and disk while serving nothing. The scan count is projected
+// so the row shape matches the other catalogue queries; an invalid index is
+// never scanned, so it is always zero.
 const invalidIndexesQuery = `
 SELECT n.nspname,
        t.relname,
        c.relname,
        pg_relation_size(c.oid),
+       pg_stat_get_numscans(c.oid),
        pg_get_indexdef(c.oid)
 FROM pg_index i
 JOIN pg_class c ON c.oid = i.indexrelid

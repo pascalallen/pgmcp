@@ -101,6 +101,12 @@ func (s *Store) TableHealth(ctx context.Context, p diagnostics.TableHealthParams
 			return fmt.Errorf("postgres: table health: %w", err)
 		}
 
+		// The bloat estimator walks every relation in the schema, so it is
+		// only worth running when there is something to merge it onto.
+		if len(findings) == 0 {
+			return nil
+		}
+
 		bloat, err := scanBloatFindings(ctx, tx, tableBloatQuery, p.Schema)
 		if err != nil {
 			return fmt.Errorf("postgres: table bloat: %w", err)
