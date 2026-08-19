@@ -7,6 +7,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -99,21 +100,26 @@ var enforcedParams = [][2]string{
 	{"default_transaction_read_only", "on"},
 }
 
+// errInvalidDSN reports an unparsable connection string. Its message is a
+// constant on purpose: url.Parse and url.ParseQuery echo the input they
+// failed on, and the input is a DSN carrying a password.
+var errInvalidDSN = errors.New("postgres: dsn is not a valid postgres URL")
+
 // withConnParams appends the enforced connection parameters to dsn, which may
 // be either a postgres:// URL or a libpq key=value string. Existing
 // parameters are preserved; a conflicting application_name or
-// default_transaction_read_only is overridden.
+// default_transaction_read_only is overridden. Errors never quote the dsn.
 func withConnParams(dsn string) (string, error) {
 	trimmed := strings.TrimSpace(dsn)
 
 	if strings.HasPrefix(trimmed, "postgres://") || strings.HasPrefix(trimmed, "postgresql://") {
 		parsed, err := url.Parse(trimmed)
 		if err != nil {
-			return "", fmt.Errorf("postgres: parse dsn: %w", err)
+			return "", errInvalidDSN
 		}
 		query, err := url.ParseQuery(parsed.RawQuery)
 		if err != nil {
-			return "", fmt.Errorf("postgres: parse dsn query: %w", err)
+			return "", errInvalidDSN
 		}
 		for _, param := range enforcedParams {
 			query.Set(param[0], param[1])
