@@ -72,6 +72,46 @@ func TestExplain(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, "sqlguard: parse_error: statement could not be parsed", err.Error())
 		assert.NotContains(t, err.Error(), "salaries")
+
+		var rejection *sqlguard.Rejection
+		require.ErrorAs(t, err, &rejection, "the sanitized error is still a rejection callers can inspect")
+		assert.Equal(t, sqlguard.ReasonParse, rejection.Reason)
+	})
+
+	t.Run("explain sanitizes a parse rejection the port raises when it revalidates", func(t *testing.T) {
+		resetPlanCache(t)
+
+		// The adapter re-validates before running EXPLAIN, so a rejection can
+		// arrive from the port carrying the parser's message.
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			return nil, &sqlguard.Rejection{
+				Reason: sqlguard.ReasonParse,
+				Detail: `syntax error at or near "SELCT" in SELCT * FROM salaries`,
+			}
+		}}, selectParser())
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELCT * FROM salaries"})
+		require.Error(t, err)
+		assert.Equal(t, "sqlguard: parse_error: statement could not be parsed", err.Error())
+		assert.NotContains(t, err.Error(), "salaries")
+		assert.NotContains(t, err.Error(), "SELCT")
+
+		var rejection *sqlguard.Rejection
+		require.ErrorAs(t, err, &rejection)
+		assert.Equal(t, sqlguard.ReasonParse, rejection.Reason)
+		assert.Equal(t, "statement could not be parsed", rejection.Detail)
+	})
+
+	t.Run("explain passes a port rejection that names no statement text through unchanged", func(t *testing.T) {
+		resetPlanCache(t)
+
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			return nil, &sqlguard.Rejection{Reason: sqlguard.ReasonFunction, Detail: "pg_sleep"}
+		}}, selectParser())
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT pg_sleep(10)"})
+		require.Error(t, err)
+		assert.Equal(t, "sqlguard: function_not_allowed: pg_sleep", err.Error())
 	})
 
 	t.Run("explain defaults buffers on and passes analyze through", func(t *testing.T) {

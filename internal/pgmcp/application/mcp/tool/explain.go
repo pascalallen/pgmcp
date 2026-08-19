@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -83,7 +82,10 @@ func Explain(d diagnostics.Diagnostics, p sqlguard.Parser) (*mcp.Tool, mcp.ToolH
 
 		result, err := d.Explain(ctx, diagnostics.ExplainParams{SQL: in.SQL, Analyze: in.Analyze, Buffers: buffers})
 		if err != nil {
-			return nil, ExplainOut{}, err
+			// The adapter re-validates the statement before running EXPLAIN,
+			// so a rejection can reach us from the port as well as from the
+			// pre-check above, and needs the same sanitizing.
+			return nil, ExplainOut{}, sanitizeRejection(err)
 		}
 		if result == nil {
 			return nil, ExplainOut{}, errors.New("explain: diagnostics returned no plan")
@@ -122,14 +124,15 @@ func Explain(d diagnostics.Diagnostics, p sqlguard.Parser) (*mcp.Tool, mcp.ToolH
 	return tool, handler
 }
 
-// sanitizeRejection strips the detail of a parse failure. Every other
-// rejection reason reports only a statement kind or a function name, but the
-// parser's message can quote the statement it choked on, and tool errors must
-// never echo SQL back.
+// sanitizeRejection replaces the detail of a parse failure with a fixed
+// phrase. Every other rejection reason reports only a statement kind or a
+// function name, but the parser's message can quote the statement it choked
+// on, and tool errors must never echo SQL back. The result is still a
+// *sqlguard.Rejection, so callers can recover the reason with errors.As.
 func sanitizeRejection(err error) error {
 	var rejection *sqlguard.Rejection
 	if errors.As(err, &rejection) && rejection.Reason == sqlguard.ReasonParse {
-		return fmt.Errorf("sqlguard: %s: statement could not be parsed", sqlguard.ReasonParse)
+		return &sqlguard.Rejection{Reason: sqlguard.ReasonParse, Detail: "statement could not be parsed"}
 	}
 
 	return err
