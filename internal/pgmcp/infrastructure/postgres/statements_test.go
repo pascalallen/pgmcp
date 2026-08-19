@@ -11,16 +11,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// taggedStatement is the query the top-queries tests look for. The tag is an
-// output alias rather than a comment on purpose: pg_stat_statements computes
-// the query id from the parse tree, which comments do not reach, so a tagged
-// comment on "SELECT 1" would be folded into the entry another test already
-// created for the untagged form. An alias is part of the tree, so this
-// statement always gets an entry of its own.
-const taggedStatement = "SELECT 1 AS pgmcp_top_test"
+// taggedStatement is the query the top-queries tests look for. Two properties
+// make it findable in a pg_stat_statements the whole package shares:
+//
+// Its tag is a table name, not a comment or an output alias. The query id is
+// computed from a jumble of the parse tree that skips both, so "SELECT 1
+// /* tag */" and "SELECT 1 AS tag" are folded into the entry an earlier
+// "SELECT 1" already created and the tag is never stored. A relation
+// reference is jumbled, so this statement always gets an entry of its own.
+//
+// It sleeps, so its total execution time dwarfs every other statement the
+// package runs (tens of microseconds each) and it sits at the top of an
+// ordering by total time no matter how busy the view is.
+const taggedStatement = "SELECT count(*) FROM pgmcp_test.pgmcp_top_test, pg_sleep(0.1)"
 
-// taggedStatementTag is the substring the tests match the recorded query text on.
+// taggedStatementTag is the substring the tests match the recorded query text
+// on, and the name of the table taggedStatement reads.
 const taggedStatementTag = "pgmcp_top_test"
+
+// taggedStatementSleepMs is how long one execution of taggedStatement sleeps.
+const taggedStatementSleepMs = 100
+
+// taggedStatementRuns is how often the tests execute taggedStatement.
+const taggedStatementRuns = 3
 
 // requirePgStatStatements skips the test when the extension is not installed
 // in the test database.
@@ -32,15 +45,35 @@ func requirePgStatStatements(t *testing.T, ctx context.Context) {
 	}
 }
 
-// runTaggedStatement executes taggedStatement times times over a raw
-// connection, so that pg_stat_statements records it.
-func runTaggedStatement(t *testing.T, ctx context.Context, times int) {
+// seedTopQueriesFixture creates the table taggedStatement reads and gives it
+// a row, so that the cross join with pg_sleep always executes. It is
+// idempotent so repeated runs against the same database are safe.
+func seedTopQueriesFixture(t *testing.T, ctx context.Context) {
 	t.Helper()
 
 	db := rawDB(t)
+	_, err := db.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS pgmcp_test")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS pgmcp_test.pgmcp_top_test(n int NOT NULL)")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+INSERT INTO pgmcp_test.pgmcp_top_test(n)
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pgmcp_test.pgmcp_top_test)`)
+	require.NoError(t, err)
+}
+
+// runTaggedStatement seeds the fixture and executes taggedStatement over a
+// raw connection, so that pg_stat_statements records it.
+func runTaggedStatement(t *testing.T, ctx context.Context, times int) {
+	t.Helper()
+
+	seedTopQueriesFixture(t, ctx)
+
+	db := rawDB(t)
 	for range times {
-		var one int
-		require.NoError(t, db.QueryRowContext(ctx, taggedStatement).Scan(&one))
+		var rows int64
+		require.NoError(t, db.QueryRowContext(ctx, taggedStatement).Scan(&rows))
+		require.Equal(t, int64(1), rows)
 	}
 }
 
@@ -96,12 +129,14 @@ func TestStoreTopQueries(t *testing.T) {
 		ctx := context.Background()
 		store := testStore(t)
 		requirePgStatStatements(t, ctx)
-		runTaggedStatement(t, ctx, 3)
+		runTaggedStatement(t, ctx, taggedStatementRuns)
 
+		// Ordered by total time the tagged statement leads by construction:
+		// it sleeps, and nothing else the package runs takes a millisecond.
 		result, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{
-			OrderBy:  diagnostics.OrderByCalls,
-			Limit:    100,
-			MinCalls: 3,
+			OrderBy:  diagnostics.OrderByTotalTime,
+			Limit:    maxTopQueriesLimit,
+			MinCalls: taggedStatementRuns,
 		})
 
 		require.NoError(t, err)
@@ -118,9 +153,11 @@ func TestStoreTopQueries(t *testing.T) {
 
 		statement := findStatement(t, result.Statements)
 		assert.NotZero(t, statement.QueryID)
-		assert.GreaterOrEqual(t, statement.Calls, int64(3))
-		assert.Greater(t, statement.TotalMs, float64(0))
-		assert.Greater(t, statement.MeanMs, float64(0))
+		assert.GreaterOrEqual(t, statement.Calls, int64(taggedStatementRuns))
+		// The recorded timings are the sleeps, minus a little slack for a
+		// clock that rounds down.
+		assert.GreaterOrEqual(t, statement.MeanMs, float64(taggedStatementSleepMs)*0.9)
+		assert.GreaterOrEqual(t, statement.TotalMs, float64(taggedStatementSleepMs*taggedStatementRuns)*0.9)
 		assert.GreaterOrEqual(t, statement.StddevMs, float64(0))
 		assert.GreaterOrEqual(t, statement.HitRatio, float64(0))
 		assert.LessOrEqual(t, statement.HitRatio, float64(1))
@@ -132,7 +169,6 @@ func TestStoreTopQueries(t *testing.T) {
 		ctx := context.Background()
 		store := testStore(t)
 		requirePgStatStatements(t, ctx)
-		runTaggedStatement(t, ctx, 3)
 
 		limited, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{MinCalls: 2, Limit: 2})
 
@@ -145,12 +181,12 @@ func TestStoreTopQueries(t *testing.T) {
 		defaulted, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{})
 
 		require.NoError(t, err)
-		assert.LessOrEqual(t, len(defaulted.Statements), 20)
+		assert.LessOrEqual(t, len(defaulted.Statements), defaultTopQueriesLimit)
 
 		clamped, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{Limit: 5000})
 
 		require.NoError(t, err)
-		assert.LessOrEqual(t, len(clamped.Statements), 100)
+		assert.LessOrEqual(t, len(clamped.Statements), maxTopQueriesLimit)
 
 		unreachable, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{MinCalls: 1 << 40})
 
@@ -163,7 +199,6 @@ func TestStoreTopQueries(t *testing.T) {
 		ctx := context.Background()
 		store := testStore(t)
 		requirePgStatStatements(t, ctx)
-		runTaggedStatement(t, ctx, 3)
 
 		result, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{OrderBy: diagnostics.OrderByCalls, Limit: 10})
 
@@ -178,12 +213,11 @@ func TestStoreTopQueries(t *testing.T) {
 		ctx := context.Background()
 		store := testStore(t)
 		requirePgStatStatements(t, ctx)
-		runTaggedStatement(t, ctx, 3)
 
 		result, err := store.TopQueries(ctx, diagnostics.TopQueriesParams{
 			OrderBy:  diagnostics.OrderByCalls,
-			Limit:    100,
-			MinCalls: 3,
+			Limit:    maxTopQueriesLimit,
+			MinCalls: 1,
 			Database: "pgmcp_no_such_database",
 		})
 
