@@ -22,6 +22,7 @@ jobs:
         if: matrix.go == 'stable'
         run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - name: Test
+        env: { CGO_ENABLED: "1" }
         run: go test -race -cover ./...
       - name: Vulnerability check
         if: matrix.go == 'stable'
