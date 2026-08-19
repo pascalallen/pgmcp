@@ -92,3 +92,58 @@ func seedLockFixture(t *testing.T, ctx context.Context) {
 	_, err = db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS pgmcp_test.lw_t(a int)")
 	require.NoError(t, err)
 }
+
+// seedFixtures creates the schema the index and table health tests inspect: a
+// table with two identical indexes on the same column (one unused, one a
+// duplicate of the other) and half its rows deleted but not vacuumed, so it
+// carries dead tuples and index bloat. Autovacuum is disabled on the table so
+// that the dead tuples survive between runs. It is idempotent: the rows are
+// only written when the table is empty. No test may scan pgmcp_test.bloaty(pad):
+// doing so would move bloaty_pad_idx out of the unused listing for good.
+func seedFixtures(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	for _, stmt := range []string{
+		"CREATE SCHEMA IF NOT EXISTS pgmcp_test",
+		"CREATE TABLE IF NOT EXISTS pgmcp_test.bloaty(id serial primary key, pad text)",
+		"ALTER TABLE pgmcp_test.bloaty SET (autovacuum_enabled = false)",
+		"CREATE INDEX IF NOT EXISTS bloaty_pad_idx ON pgmcp_test.bloaty(pad)",
+		"CREATE INDEX IF NOT EXISTS bloaty_pad_idx2 ON pgmcp_test.bloaty(pad)",
+		"CREATE TABLE IF NOT EXISTS pgmcp_test.lw_t(a int)",
+		"CREATE TABLE IF NOT EXISTS pgmcp_test.ro_probe(id serial primary key, val text)",
+	} {
+		_, err := db.ExecContext(ctx, stmt)
+		require.NoError(t, err)
+	}
+
+	var probeRows int64
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM pgmcp_test.ro_probe").Scan(&probeRows))
+	if probeRows == 0 {
+		_, err := db.ExecContext(ctx,
+			"INSERT INTO pgmcp_test.ro_probe(val) SELECT 'original' FROM generate_series(1, 3)")
+		require.NoError(t, err)
+	}
+
+	var rows int64
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM pgmcp_test.bloaty").Scan(&rows))
+	if rows == 0 {
+		// Every pad is distinct: identical values would be collapsed by btree
+		// deduplication into an index far too small to bloat measurably.
+		_, err := db.ExecContext(ctx,
+			"INSERT INTO pgmcp_test.bloaty(pad) SELECT repeat('a', 100) || g FROM generate_series(1, 20000) g")
+		require.NoError(t, err)
+
+		// Deleting without vacuuming leaves the dead tuples and the index
+		// entries pointing at them in place, which is the condition under test.
+		_, err = db.ExecContext(ctx, "DELETE FROM pgmcp_test.bloaty WHERE id % 2 = 0")
+		require.NoError(t, err)
+	}
+
+	// ANALYZE (never VACUUM) refreshes reltuples and the column statistics the
+	// bloat estimation queries read, without removing a single dead tuple.
+	_, err := db.ExecContext(ctx, "ANALYZE pgmcp_test.bloaty")
+	require.NoError(t, err)
+}
