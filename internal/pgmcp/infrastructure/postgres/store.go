@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pascalallen/pgmcp/internal/pgmcp/domain/diagnostics"
+
 	// lib/pq is registered as the "postgres" driver and its *pq.Error is used
 	// to classify read-only violations and statement timeouts.
 	_ "github.com/lib/pq"
@@ -21,6 +23,8 @@ import (
 // connMaxLifetime bounds how long a pooled connection is reused, so that
 // server-side restarts and failovers are picked up without a restart.
 const connMaxLifetime = 30 * time.Minute
+
+var _ diagnostics.Diagnostics = (*Store)(nil)
 
 // Store is the PostgreSQL implementation of the diagnostics port.
 type Store struct {
@@ -64,13 +68,18 @@ func Open(ctx context.Context, dsn string, maxConns int, callTimeout time.Durati
 		return nil, fmt.Errorf("postgres: ping: %w", err)
 	}
 
-	var database string
-	if err := db.QueryRowContext(ctx, "SELECT current_database()").Scan(&database); err != nil {
+	store := &Store{db: db, log: log, defaultTimeout: callTimeout}
+
+	// Read the database name through readOnly like every other statement, so
+	// the adapter has no path that runs SQL outside a read-only transaction.
+	if err := store.readOnly(ctx, callTimeout, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, "SELECT current_database()").Scan(&store.database)
+	}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("postgres: current_database: %w", err)
 	}
 
-	return &Store{db: db, log: log, defaultTimeout: callTimeout, database: database}, nil
+	return store, nil
 }
 
 // Close releases the connection pool.
