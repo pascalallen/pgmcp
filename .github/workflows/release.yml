@@ -13,7 +13,7 @@ jobs:
         # goreleaser derives the changelog from the commit range since the
         # previous tag, so it needs the whole history, not a shallow clone.
         with: { fetch-depth: 0 }
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version: "stable", check-latest: true }
       # scripts/mcpb-pack.sh runs the @anthropic-ai/mcpb CLI (pinned there)
       # from a goreleaser hook to pack the Claude Desktop bundle.
