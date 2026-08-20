@@ -15,6 +15,7 @@ func TestParserParse(t *testing.T) {
 		kinds     []string
 		nodeTypes []string
 		functions []string
+		schemas   []string
 	}{
 		{
 			name:      "a plain select reports a single SelectStmt kind",
@@ -22,6 +23,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "ResTarget", "A_Const"},
 			functions: []string{},
+			schemas:   []string{},
 		},
 		{
 			name:      "a cte wrapping a delete exposes the nested DeleteStmt",
@@ -29,6 +31,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "DeleteStmt", "CommonTableExpr", "RangeVar"},
 			functions: []string{},
+			schemas:   []string{""},
 		},
 		{
 			name:      "function names are reported lowercased",
@@ -36,6 +39,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "FuncCall"},
 			functions: []string{"pg_terminate_backend", "now"},
+			schemas:   []string{},
 		},
 		{
 			name:      "a schema qualified function keeps only its last name segment",
@@ -43,6 +47,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "FuncCall"},
 			functions: []string{"pg_terminate_backend"},
+			schemas:   []string{},
 		},
 		{
 			name:      "a for update clause is reported as a LockingClause node",
@@ -50,6 +55,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "LockingClause", "RangeVar"},
 			functions: []string{},
+			schemas:   []string{""},
 		},
 		{
 			name:      "a select into is reported as an IntoClause node",
@@ -57,6 +63,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "IntoClause"},
 			functions: []string{},
+			schemas:   []string{""},
 		},
 		{
 			name:      "two statements report two kinds",
@@ -64,6 +71,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt", "SelectStmt"},
 			nodeTypes: []string{"SelectStmt"},
 			functions: []string{},
+			schemas:   []string{},
 		},
 		{
 			name:      "a merge statement reports the MergeStmt kind",
@@ -71,6 +79,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"MergeStmt"},
 			nodeTypes: []string{"MergeStmt", "MergeWhenClause", "RangeVar"},
 			functions: []string{},
+			schemas:   []string{""},
 		},
 		{
 			name:      "an update reports the UpdateStmt kind",
@@ -78,6 +87,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"UpdateStmt"},
 			nodeTypes: []string{"UpdateStmt", "RangeVar"},
 			functions: []string{},
+			schemas:   []string{""},
 		},
 		{
 			name:      "a set statement reports the VariableSetStmt kind",
@@ -85,6 +95,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"VariableSetStmt"},
 			nodeTypes: []string{"VariableSetStmt"},
 			functions: []string{},
+			schemas:   []string{},
 		},
 		{
 			name:      "a show statement reports the VariableShowStmt kind",
@@ -92,6 +103,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"VariableShowStmt"},
 			nodeTypes: []string{"VariableShowStmt"},
 			functions: []string{},
+			schemas:   []string{},
 		},
 		{
 			name:      "an explain reports the ExplainStmt kind and its inner select",
@@ -99,6 +111,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"ExplainStmt"},
 			nodeTypes: []string{"ExplainStmt", "SelectStmt", "RangeVar"},
 			functions: []string{},
+			schemas:   []string{"public"},
 		},
 		{
 			name:      "a function inside a subquery is reported",
@@ -106,6 +119,7 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{"SelectStmt"},
 			nodeTypes: []string{"SelectStmt", "SubLink", "FuncCall"},
 			functions: []string{"pg_sleep"},
+			schemas:   []string{""},
 		},
 		{
 			name:      "an empty statement reports no kinds",
@@ -113,6 +127,47 @@ func TestParserParse(t *testing.T) {
 			kinds:     []string{},
 			nodeTypes: []string{},
 			functions: []string{},
+			schemas:   []string{},
+		},
+		{
+			name:      "a schema qualified table reports its schema",
+			sql:       "select * from public.orders",
+			kinds:     []string{"SelectStmt"},
+			nodeTypes: []string{"SelectStmt", "RangeVar"},
+			functions: []string{},
+			schemas:   []string{"public"},
+		},
+		{
+			name:      "an unqualified table reports the empty schema",
+			sql:       "select * from orders",
+			kinds:     []string{"SelectStmt"},
+			nodeTypes: []string{"SelectStmt", "RangeVar"},
+			functions: []string{},
+			schemas:   []string{""},
+		},
+		{
+			name:      "a join across two schemas reports both",
+			sql:       "select * from public.orders o join sales.items i on i.id = o.id",
+			kinds:     []string{"SelectStmt"},
+			nodeTypes: []string{"SelectStmt", "RangeVar", "JoinExpr"},
+			functions: []string{},
+			schemas:   []string{"public", "sales"},
+		},
+		{
+			name:      "a table hidden in a subquery reports its schema too",
+			sql:       "select * from public.orders where id in (select id from private.secrets)",
+			kinds:     []string{"SelectStmt"},
+			nodeTypes: []string{"SelectStmt", "SubLink", "RangeVar"},
+			functions: []string{},
+			schemas:   []string{"private", "public"},
+		},
+		{
+			name:      "a quoted schema keeps the case it was written in",
+			sql:       `select * from "Public".t`,
+			kinds:     []string{"SelectStmt"},
+			nodeTypes: []string{"SelectStmt", "RangeVar"},
+			functions: []string{},
+			schemas:   []string{"Public"},
 		},
 	}
 
@@ -127,6 +182,7 @@ func TestParserParse(t *testing.T) {
 				assert.Truef(t, stmt.NodeTypes[nodeType], "expected node type %q in %v", nodeType, stmt.NodeTypes)
 			}
 			assert.ElementsMatch(t, tc.functions, stmt.Functions)
+			assert.Equal(t, tc.schemas, stmt.Schemas)
 		})
 	}
 }
@@ -141,13 +197,14 @@ func TestParserParseReportsAnErrorForInvalidSQL(t *testing.T) {
 }
 
 func TestParserNeverReturnsNilSlices(t *testing.T) {
-	t.Run("kinds and functions are empty rather than nil", func(t *testing.T) {
+	t.Run("kinds, functions and schemas are empty rather than nil", func(t *testing.T) {
 		stmt, err := Parser{}.Parse("select 1")
 
 		require.NoError(t, err)
 		assert.NotNil(t, stmt.Kinds)
 		assert.NotNil(t, stmt.Functions)
 		assert.NotNil(t, stmt.NodeTypes)
+		assert.NotNil(t, stmt.Schemas)
 	})
 }
 
