@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -21,9 +20,6 @@ const (
 	discardedRowsMinCount = 1000   // rows removed below this are noise
 	hotNodeLimit          = 3
 )
-
-// errNoPlan reports an EXPLAIN payload that carries no plan.
-var errNoPlan = errors.New("explain output contains no plan")
 
 // explainEnvelope is one element of the EXPLAIN (FORMAT JSON) array.
 type explainEnvelope struct {
@@ -62,7 +58,7 @@ func ParseExplainJSON(raw []byte) (*ExplainResult, error) {
 		return nil, err
 	}
 	if len(envelopes) == 0 {
-		return nil, errNoPlan
+		return nil, ErrNoPlan
 	}
 
 	envelope := envelopes[0]

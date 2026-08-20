@@ -1,5 +1,8 @@
 name: Go
-on: { push: { branches: [main] }, pull_request: { branches: [main] } }
+# Every pull request runs CI, including one stacked on another feature branch.
+on:
+  push: { branches: [main] }
+  pull_request:
 permissions: { contents: read }
 jobs:
   test:
@@ -14,6 +17,10 @@ jobs:
         run: |
           docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16 -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
           for i in $(seq 1 30); do docker exec pg pg_isready -U postgres && break; sleep 1; done
+      - name: Install pg_stat_statements
+        run: |
+          for i in $(seq 1 30); do docker exec pg psql -U postgres -c "SELECT 1" >/dev/null 2>&1 && break; sleep 1; done
+          docker exec pg psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - name: Vet
