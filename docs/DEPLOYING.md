@@ -15,6 +15,7 @@ keeps the server read-only.
 - [Configuration](#configuration)
 - [Run modes](#run-modes)
   - [stdio, under Claude Code or Claude Desktop](#stdio-under-claude-code-or-claude-desktop)
+  - [Claude Desktop, the one-click bundle](#claude-desktop-the-one-click-bundle)
   - [http, behind a TLS terminator](#http-behind-a-tls-terminator)
   - [Docker](#docker)
   - [Docker Compose](#docker-compose)
@@ -125,7 +126,8 @@ claude mcp add pgmcp \
 
 `docker run -i` is not optional here: stdio is the transport.
 
-For Claude Desktop, the same thing in `claude_desktop_config.json`:
+For Claude Desktop, the same thing in `claude_desktop_config.json` — or skip the
+file and install the bundle, next section:
 
 ```json
 {
@@ -139,6 +141,39 @@ For Claude Desktop, the same thing in `claude_desktop_config.json`:
   }
 }
 ```
+
+### Claude Desktop, the one-click bundle
+
+Every release carries `pgmcp_<version>.mcpb`, an [MCP Bundle](https://github.com/modelcontextprotocol/mcpb):
+a zip of the binary and a manifest that tells Claude Desktop how to launch it.
+Download it from [Releases](https://github.com/pascalallen/pgmcp/releases) and
+open it (double-click, or drag it onto Settings → Extensions). Desktop shows
+what it is about to install and asks for:
+
+| Field | Maps to | Notes |
+| --- | --- | --- |
+| Database URL | `PGMCP_DATABASE_URL` | Required. Marked sensitive, so Desktop stores it in the OS keychain, not in a config file. |
+| Query schemas | `PGMCP_QUERY_SCHEMAS` | Optional comma-separated allowlist for `query` and `explain`. |
+| Disable the ad hoc query tool | `PGMCP_DISABLE_QUERY` | Off by default. |
+
+That is the whole configuration surface over the bundle; it runs stdio with
+every other setting at its default. Anything else — `--log-level`, timeouts —
+needs the hand-written config above instead.
+
+One bundle serves both platforms Claude Desktop ships for: `server/pgmcp` is a
+macOS universal binary (arm64 + amd64 in one Mach-O) and `server/pgmcp.exe` is
+windows/amd64, which Windows on ARM runs under x64 emulation. The manifest
+picks between them by OS; it has no notion of architecture, which is why the
+macOS side is universal rather than two files. Linux is not in the bundle
+because there is no Claude Desktop for Linux — use a binary, `go install` or
+the image there. The bundle is about 20 MB compressed and 60 MB on disk; nearly
+all of it is the pure-Go SQL parser, twice.
+
+Upgrading is installing the new bundle over the old one. The bundle is not
+signed — a self-signed signature would prove nothing — so verify the download
+against `pgmcp_<version>_checksums.txt` if the source matters to you; the
+registry entry's `fileSha256` is that same hash, and MCP clients check it
+before installing.
 
 ### http, behind a TLS terminator
 
@@ -261,19 +296,46 @@ not where RFC 9728 says a client should look. Known limitation; use the origin.
 ## Releasing
 
 Tagging is the whole release process. `.github/workflows/release.yml` runs on
-`v*` tags and does three things: goreleaser cuts the GitHub release with six
-binaries and their checksums, pushes the multi-arch image to
-`ghcr.io/pascalallen/pgmcp`, and then `mcp-publisher` publishes `server.json` to
-the MCP Registry.
+`v*` tags and does four things: goreleaser cuts the GitHub release with six
+binaries, the Claude Desktop bundle and their checksums, pushes the multi-arch
+image to `ghcr.io/pascalallen/pgmcp`, and then `mcp-publisher` publishes
+`server.json` — an OCI package and an MCPB package — to the MCP Registry.
 
 ```bash
 git tag -a v1.0.0 -m "v1.0.0" && git push origin v1.0.0
 ```
 
 goreleaser's `{{ .Version }}` is the tag with the leading `v` stripped, so
-`v1.0.0` produces `ghcr.io/pascalallen/pgmcp:1.0.0`, and the publish job rewrites
-`server.json`'s `version` and package `identifier` to match before publishing.
-The three must agree; nothing else keeps them in step.
+`v1.0.0` produces `ghcr.io/pascalallen/pgmcp:1.0.0` and `pgmcp_1.0.0.mcpb`, and
+the publish job rewrites `server.json`'s `version` and both package
+`identifier`s to match before publishing. They must agree; nothing else keeps
+them in step.
+
+The bundle is packed by `scripts/mcpb-pack.sh`, run from the
+`universal_binaries` post hook in `.goreleaser.yaml` — the last point in
+goreleaser's pipeline where every binary exists but archives, checksums and
+upload have not happened, so the `.mcpb` is checksummed and uploaded like any
+other asset. The script joins the darwin universal binary and the windows/amd64
+binary with `mcpb/manifest.json` (version stamped in from the tag) and runs the
+`@anthropic-ai/mcpb` CLI to validate and pack. That CLI is pinned in the script
+(`MCPB_VERSION`); there is no `package.json` for Dependabot to watch, so bump it
+by hand and re-run the snapshot check below. `mcpb/manifest.json` lists the
+tools statically, and `TestBundleManifest` holds that list to the catalogue.
+
+The registry requires a `fileSha256` for an MCPB package, and it has to be the
+hash of the asset as published. The publish job therefore downloads the bundle
+back from the GitHub release, checks it against goreleaser's checksum file, and
+only then writes the hash into `server.json`. The committed `server.json`
+carries an all-zero placeholder in that field; the job refuses to publish if
+the placeholder survives.
+
+Check the whole pipeline locally, without publishing anything (needs Node for
+the mcpb CLI):
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean --skip=publish,docker
+ls dist/*.mcpb && grep mcpb dist/*_checksums.txt
+```
 
 **One-time setup, before the first tag:** a package pushed to GHCR is private by
 default, and the MCP Registry verifies OCI ownership by pulling the image and
@@ -291,8 +353,14 @@ the workflow's own identity, so there is no publishing secret in this repo.
 ```bash
 brew install mcp-publisher                  # or download from the registry releases
 VERSION=1.0.0
-jq --arg v "$VERSION" '.version = $v | .packages[0].identifier = "ghcr.io/pascalallen/pgmcp:" + $v' \
-  server.json > server.json.tmp && mv server.json.tmp server.json
+gh release download "v$VERSION" --pattern "pgmcp_${VERSION}.mcpb"
+SHA="$(openssl dgst -sha256 -r "pgmcp_${VERSION}.mcpb" | cut -d' ' -f1)"
+jq --arg v "$VERSION" --arg sha "$SHA" '
+  .version = $v
+  | (.packages[] | select(.registryType == "oci")).identifier = "ghcr.io/pascalallen/pgmcp:" + $v
+  | (.packages[] | select(.registryType == "mcpb")).identifier = "https://github.com/pascalallen/pgmcp/releases/download/v" + $v + "/pgmcp_" + $v + ".mcpb"
+  | (.packages[] | select(.registryType == "mcpb")).fileSha256 = $sha
+' server.json > server.json.tmp && mv server.json.tmp server.json
 mcp-publisher validate server.json
 mcp-publisher login github                  # browser OAuth
 mcp-publisher publish

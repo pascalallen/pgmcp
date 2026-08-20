@@ -1,11 +1,12 @@
-# goreleaser builds every released artifact: six binaries, their archives, a
-# checksum file, and the multi-arch ghcr.io image the MCP Registry points at.
+# goreleaser builds every released artifact: six binaries, their archives, the
+# Claude Desktop bundle (.mcpb), a checksum file, and the multi-arch ghcr.io
+# image the MCP Registry points at.
 #
 # {{ .Version }} is the tag with its leading "v" stripped, so tag v1.0.0
-# produces ghcr.io/pascalallen/pgmcp:1.0.0 — the exact identifier server.json
-# declares.
+# produces ghcr.io/pascalallen/pgmcp:1.0.0 and pgmcp_1.0.0.mcpb — the exact
+# identifiers server.json declares.
 #
-# Verify locally without publishing anything:
+# Verify locally without publishing anything (needs Node for the mcpb CLI):
 #   goreleaser check
 #   goreleaser release --snapshot --clean --skip=publish,docker
 version: 2
@@ -37,6 +38,28 @@ builds:
     # same tag is byte-identical.
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+# The darwin arm64 and amd64 builds are joined into one Mach-O for the Claude
+# Desktop bundle, because the MCPB manifest can pick a binary per OS but not
+# per architecture. replace: false keeps the per-arch archives above as they
+# are; the universal binary is not archived on its own (archives filter on the
+# build id), it only ever ships inside the bundle.
+#
+# The post hook is where the bundle is packed: it is the last point in
+# goreleaser's pipeline where every binary exists and archives, checksums and
+# publish have not yet run, so the .mcpb is checksummed and uploaded like any
+# other asset via the extra_files entries below.
+universal_binaries:
+  - id: pgmcp-darwin-universal
+    ids:
+      - pgmcp
+    name_template: pgmcp
+    replace: false
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        - cmd: scripts/mcpb-pack.sh {{ .Version }} {{ .Path }}
+          output: true
+
 archives:
   - id: pgmcp
     ids:
@@ -55,6 +78,8 @@ archives:
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  extra_files:
+    - glob: dist/*.mcpb
 
 changelog:
   use: github
@@ -120,7 +145,15 @@ docker_manifests:
 release:
   draft: false
   prerelease: auto
+  extra_files:
+    - glob: dist/*.mcpb
   footer: |
+    ## Claude Desktop
+
+    Download `pgmcp_{{ .Version }}.mcpb` above and open it with Claude Desktop
+    (macOS universal, Windows x64). It asks for a Postgres connection string
+    and stores it in the OS keychain.
+
     ## Container image
 
     ```

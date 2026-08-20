@@ -11,7 +11,9 @@ pgmcp is a read-only PostgreSQL ops/DBA server for the Model Context Protocol, b
 
 ## Installation
 
-Download a binary for your platform from [Releases](https://github.com/pascalallen/pgmcp/releases) — `darwin`, `linux` and `windows`, `amd64` and `arm64`, with checksums.
+**Claude Desktop, one click:** download `pgmcp_<version>.mcpb` from [Releases](https://github.com/pascalallen/pgmcp/releases) and open it. Claude Desktop asks for a Postgres connection string, keeps it in the OS keychain, and launches the bundled binary itself — nothing on `PATH`, no config file to edit. One bundle covers macOS (universal) and Windows (x64).
+
+Otherwise download a binary for your platform from [Releases](https://github.com/pascalallen/pgmcp/releases) — `darwin`, `linux` and `windows`, `amd64` and `arm64`, with checksums.
 
 Or build from source with the Go CLI tool [go](https://go.dev/dl/):
 
@@ -41,7 +43,7 @@ claude mcp add pgmcp --transport stdio \
   -- pgmcp
 ```
 
-**Claude Desktop, stdio** — the same thing in `claude_desktop_config.json`:
+**Claude Desktop, stdio** — install the `.mcpb` bundle from Releases (see [Installation](#installation)), or write the same thing into `claude_desktop_config.json` by hand:
 
 ```json
 {

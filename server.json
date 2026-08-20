@@ -24,6 +24,22 @@
           "isSecret": true
         }
       ]
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/pascalallen/pgmcp/releases/download/v1.0.0/pgmcp_1.0.0.mcpb",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PGMCP_DATABASE_URL",
+          "description": "Postgres connection string (read-only role recommended)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
     }
   ]
 }
