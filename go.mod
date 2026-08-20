@@ -3,6 +3,8 @@ module github.com/pascalallen/pgmcp
 go 1.25.0
 
 require (
+	github.com/MicahParks/keyfunc/v3 v3.8.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -12,6 +14,7 @@ require (
 )
 
 require (
+	github.com/MicahParks/jwkset v0.11.1 // indirect
 	github.com/google/subcommands v1.2.0 // indirect
 	github.com/google/wire v0.7.0 // indirect
 	github.com/pganalyze/pg_query_go/v6 v6.2.2 // indirect
