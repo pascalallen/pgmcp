@@ -104,6 +104,11 @@ func Query(d diagnostics.Diagnostics, p sqlguard.Parser, allowedSchemas []string
 // statement text, so naming the offending one back to the caller leaks no
 // SQL. Both tools that accept caller-supplied SQL — query and explain — run
 // it, so the allowlist bounds explain's analyze=true execution too.
+//
+// The allowlist constrains table references only; functions and views can
+// still read other schemas. It is a guardrail against accidental
+// cross-schema queries, not a security boundary — the boundary is the
+// database role the server connects as.
 func checkSchemas(tool, sql string, p sqlguard.Parser, allowedSchemas []string) error {
 	if len(allowedSchemas) == 0 {
 		return nil
@@ -124,8 +129,9 @@ func checkSchemas(tool, sql string, p sqlguard.Parser, allowedSchemas []string) 
 
 	for _, schema := range stmt.Schemas {
 		if schema == "" {
-			return fmt.Errorf("%s: schema-qualify every table reference when a schema allowlist is configured, "+
-				"including references to a common table expression; allowed schemas: %s", tool, strings.Join(allowedSchemas, ", "))
+			return fmt.Errorf("%s: schema-qualify every table reference when the schema allowlist is enabled; "+
+				"a common table expression cannot be qualified — inline it as a subquery instead; allowed schemas: %s",
+				tool, strings.Join(allowedSchemas, ", "))
 		}
 		if !allowed[strings.ToLower(schema)] {
 			return fmt.Errorf("%s: schema %q is not in the allowed list: %s", tool, schema, strings.Join(allowedSchemas, ", "))
