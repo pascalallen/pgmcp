@@ -25,9 +25,16 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
+      # Pinned rather than @latest, and deliberately to a prerelease. setup-go's
+      # check-latest moved the stable leg to Go 1.27, whose export data
+      # staticcheck's current stable release (v0.7.0 / 2026.1) cannot read:
+      # "export data version 4 is greater than maximum supported version 2".
+      # v0.8.0-rc.1 is the first version that reads it. Verified against Go
+      # 1.27.0 locally: clean on this tree, and still exits 1 on a real finding.
+      # Move back to @latest once v0.8.0 is final.
       - name: Staticcheck
         if: matrix.go == 'stable'
-        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.0-rc.1 ./...
       - name: Test
         env: { CGO_ENABLED: "1" }
         run: go test -race -cover ./...
