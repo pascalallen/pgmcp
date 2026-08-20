@@ -65,7 +65,7 @@ these tests fail, the change is wrong until proven otherwise.
 
 - All nine tools register by default, eight with `--disable-query`, and a disabled `query` tool cannot be called at all — pinned by `TestRegister` and `TestNames` (`application/mcp/tool`).
 - Every registered tool is annotated read-only, non-destructive, idempotent and closed-world, with a title and an output schema — pinned by `TestRegister` (`application/mcp/tool`).
-- The `query` schema allowlist is matched case-insensitively, refuses an unqualified table reference, and names only the schema back to the caller — pinned by `TestQuerySchemaAllowlist` (`application/mcp/tool`).
+- The schema allowlist binds `query` **and** `explain`, is matched case-insensitively, refuses an unqualified table reference, and names only the schema back to the caller — pinned by `TestQuerySchemaAllowlist` and `TestExplainSchemaAllowlist` (`application/mcp/tool`).
 - Slices in a tool output are empty, never null: plan children, hot nodes and warnings, columns and rows, and the parser's own slices — pinned by `TestExplain`, `TestQuery` (`application/mcp/tool`) and `TestParserNeverReturnsNilSlices` (`infrastructure/postgres`).
 - The domain result types marshal the JSON keys the tool output schemas are derived from — pinned by `TestExplainResultMarshalsExpectedTopLevelKeys` and `TestIndexHealthResultMarshalsExpectedTopLevelKeys` (`domain/diagnostics`).
 - A configuration error exits 2 and a runtime failure exits 1 — pinned by `TestCommandStartup` (`cmd/pgmcp`).

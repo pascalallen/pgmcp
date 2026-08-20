@@ -34,7 +34,7 @@ var catalogNames = []string{
 // hoc query tool may read.
 type Options struct {
 	DisableQuery bool     // leave the ad hoc query tool unregistered entirely
-	QuerySchemas []string // when set, the query tool may only read tables in these schemas
+	QuerySchemas []string // when set, the query and explain tools may only read tables in these schemas
 }
 
 // Deps are the collaborators every tool in the catalogue is built from.
@@ -50,7 +50,7 @@ func Register(s *mcp.Server, deps Deps, opts Options) {
 	topQueries, topQueriesHandler := TopQueries(deps.Diag)
 	mcp.AddTool(s, topQueries, topQueriesHandler)
 
-	explain, explainHandler := Explain(deps.Diag, deps.Parser)
+	explain, explainHandler := Explain(deps.Diag, deps.Parser, opts.QuerySchemas)
 	mcp.AddTool(s, explain, explainHandler)
 
 	indexHealth, indexHealthHandler := IndexHealth(deps.Diag)

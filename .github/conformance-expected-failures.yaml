@@ -47,7 +47,7 @@ server:
   - elicitation-sep1330-enums
 
   # Require the test:// resource fixtures (static text, static binary, a
-  # template) and resource subscriptions. pgmcp serves two live pg:// resources
+  # template) and resource subscriptions. pgmcp serves two live pgmcp:// resources
   # and does not implement subscribe/unsubscribe: its resources are snapshots
   # of a database, with no change feed to subscribe to.
   - resources-read-text

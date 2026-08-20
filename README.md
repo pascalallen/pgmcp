@@ -88,7 +88,7 @@ TLS termination, the proxy settings the streaming transport needs, JWT auth agai
 
 Every tool is annotated `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`, and returns a typed output schema.
 
-`query` is the only tool that carries free-form SQL, and it is optional. `--disable-query` drops it from the catalogue entirely — a deployment that only needs the eight diagnostics tools can run without any ad hoc SQL surface at all. `--query-schemas=public,app` restricts it to named schemas instead; read what that does and does not stop in [docs/SECURITY.md](docs/SECURITY.md).
+`query` is the only tool that carries free-form SQL, and it is optional. `--disable-query` drops it from the catalogue entirely — a deployment that only needs the eight diagnostics tools can run without any ad hoc SQL surface at all. `--query-schemas=public,app` restricts it to named schemas instead — and bounds `explain` with it, since `analyze=true` executes the statement; read what that does and does not stop in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Resources & prompt
 
@@ -118,7 +118,7 @@ Every setting has a `--flag` and a `PGMCP_<KEY>` environment variable. Flags win
 | `--jwt-audience` | `PGMCP_JWT_AUDIENCE` | — | Required `aud` claim, required for `jwt` |
 | `--auth-servers` | `PGMCP_AUTH_SERVERS` | — | Comma-separated OAuth authorization servers to advertise via RFC 9728 |
 | `--disable-query` | `PGMCP_DISABLE_QUERY` | `false` | Drop the ad hoc `query` tool entirely |
-| `--query-schemas` | `PGMCP_QUERY_SCHEMAS` | — | Comma-separated schemas the `query` tool may read; unset disables the allowlist |
+| `--query-schemas` | `PGMCP_QUERY_SCHEMAS` | — | Comma-separated schemas the `query` and `explain` tools may read; unset disables the allowlist |
 | `--max-conns` | `PGMCP_MAX_CONNS` | `4` | Maximum Postgres connections |
 | `--call-timeout` | `PGMCP_CALL_TIMEOUT` | `60s` | Per-tool-call timeout |
 | `--rate-limit` | `PGMCP_RATE_LIMIT` | `60` | Tool calls per principal per minute (HTTP only) |
@@ -134,7 +134,7 @@ The auth block applies to the HTTP transport only. Over stdio the operating syst
 
 - **Read-only three independent ways.** A dedicated role with no write privilege (`pg_monitor` plus `SELECT`, and deliberately *not* `pg_signal_backend`); `BEGIN READ ONLY` with `SET LOCAL statement_timeout` and `lock_timeout = '2s'` around every statement the adapter runs, always rolled back; and a parser-level guard, because a read-only transaction alone does not stop `pg_terminate_backend`, `pg_read_file`, `pg_sleep` or `setval`.
 - **The SQL guard is allow-list first.** One top-level statement, and it must be a `SELECT`, `EXPLAIN` or `SHOW`; no nested write statement anywhere in the tree; no `FOR UPDATE`/`FOR SHARE` locking clause; no `SELECT INTO`; and no call to a denied function — file access, backup and WAL control, replication slots, advisory locks, `dblink`, sequence mutation, stats resets.
-- **The schema allowlist is a guardrail, not a boundary.** `--query-schemas` matches the schemas qualifying *table references* in the parsed statement, case-insensitively. A view, a set-returning function, or a `SECURITY DEFINER` function inside an allowed schema can still read outside it. Database privileges are the boundary; the allowlist just narrows the obvious path.
+- **The schema allowlist is a guardrail, not a boundary.** `--query-schemas` matches the schemas qualifying *table references* in the parsed statement, case-insensitively, and it bounds both tools that carry caller-supplied SQL — `query` and `explain`, so `explain` with `analyze=true` cannot execute against a schema you excluded. A view, a set-returning function, or a `SECURITY DEFINER` function inside an allowed schema can still read outside it. Database privileges are the boundary; the allowlist just narrows the obvious path.
 - **Authenticated, fail-closed, over HTTP.** Static keys are compared in constant time against every stored hash without an early exit; JWTs are validated against a JWK set with asymmetric algorithms only (no `alg=none`, no HMAC confusion) and a required `iss`, `aud` and `exp`, and the verifier holds no keys until the JWKS arrives, so it starts closed rather than open. RFC 9728 protected resource metadata advertises where to get a token. The server refuses to start on a non-loopback address with auth off.
 - **Bounded.** Per-principal rate limiting, a per-call timeout, a statement timeout and lock timeout inside the transaction, a row cap on the `query` tool, a cap on a result's structured content, and a 1 MiB request body limit.
 - **Nothing sensitive is logged.** A tool call logs its name, duration, outcome and the caller's user id — never arguments, SQL text, result rows or error text. Parse failures come back as a fixed phrase rather than echoing the statement, and the DSN is redacted from connection errors.

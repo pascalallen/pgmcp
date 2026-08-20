@@ -120,11 +120,15 @@ role with no write privilege.
 
 ### 5. The schema allowlist
 
-`--query-schemas` restricts the `query` tool to named schemas. Be precise
-about what it does:
+`--query-schemas` restricts the `query` and `explain` tools to named schemas.
+Be precise about what it does:
 
 - It compares the schemas qualifying **table references** in the parsed
   statement against the list.
+- It bounds **both** tools that carry caller-supplied SQL. `explain` runs the
+  same check as `query`, because `analyze=true` executes the statement — an
+  allowlist that stopped only `query` would leave row counts as a readable
+  oracle over the schemas you excluded.
 - With a list set, **every** table reference must be schema-qualified —
   including a reference to a CTE defined in the same statement. An unqualified
   name is refused rather than resolved against `search_path`, because
@@ -278,9 +282,10 @@ anything you care about.
   server can actually absorb, and remember the query still burns I/O and CPU
   until the timeout fires.
 - **`explain` with `analyze=true` executes the statement.** That is what
-  `EXPLAIN ANALYZE` is. It is still inside the read-only transaction and still
-  guarded, so it cannot write, but it is not free — the same expense caveat
-  applies, and more directly.
+  `EXPLAIN ANALYZE` is. It is still inside the read-only transaction, still
+  guarded, and still bounded by the schema allowlist, so it cannot write and
+  cannot reach a schema you excluded. It is not free, though: the same expense
+  caveat applies, and more directly.
 - **Prompt injection travels through result rows.** Anything the database
   returns is data the model reads, and a row can contain text shaped like an
   instruction. pgmcp cannot sanitize this: the rows *are* the answer. What it
