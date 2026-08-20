@@ -59,7 +59,7 @@ func Query(d diagnostics.Diagnostics, p sqlguard.Parser, allowedSchemas []string
 			return nil, QueryOut{}, sanitizeRejection(err)
 		}
 
-		if err := checkQuerySchemas(in.SQL, p, allowedSchemas); err != nil {
+		if err := checkSchemas("query", in.SQL, p, allowedSchemas); err != nil {
 			return nil, QueryOut{}, err
 		}
 
@@ -97,17 +97,19 @@ func Query(d diagnostics.Diagnostics, p sqlguard.Parser, allowedSchemas []string
 	return tool, handler
 }
 
-// checkQuerySchemas enforces the configured schema allowlist. It is a no-op
-// when no allowlist was configured; otherwise every table the statement names
-// must be qualified with an allowed schema, compared case-insensitively.
-// Schema names are identifiers rather than statement text, so naming the
-// offending one back to the caller leaks no SQL.
+// checkSchemas enforces the configured schema allowlist on behalf of the
+// named tool. It is a no-op when no allowlist was configured; otherwise every
+// table the statement names must be qualified with an allowed schema,
+// compared case-insensitively. Schema names are identifiers rather than
+// statement text, so naming the offending one back to the caller leaks no
+// SQL. Both tools that accept caller-supplied SQL — query and explain — run
+// it, so the allowlist bounds explain's analyze=true execution too.
 //
 // The allowlist constrains table references only; functions and views can
 // still read other schemas. It is a guardrail against accidental
 // cross-schema queries, not a security boundary — the boundary is the
 // database role the server connects as.
-func checkQuerySchemas(sql string, p sqlguard.Parser, allowedSchemas []string) error {
+func checkSchemas(tool, sql string, p sqlguard.Parser, allowedSchemas []string) error {
 	if len(allowedSchemas) == 0 {
 		return nil
 	}
@@ -127,12 +129,12 @@ func checkQuerySchemas(sql string, p sqlguard.Parser, allowedSchemas []string) e
 
 	for _, schema := range stmt.Schemas {
 		if schema == "" {
-			return fmt.Errorf("query: schema-qualify every table reference when the schema allowlist is enabled; "+
+			return fmt.Errorf("%s: schema-qualify every table reference when the schema allowlist is enabled; "+
 				"a common table expression cannot be qualified — inline it as a subquery instead; allowed schemas: %s",
-				strings.Join(allowedSchemas, ", "))
+				tool, strings.Join(allowedSchemas, ", "))
 		}
 		if !allowed[strings.ToLower(schema)] {
-			return fmt.Errorf("query: schema %q is not in the allowed list: %s", schema, strings.Join(allowedSchemas, ", "))
+			return fmt.Errorf("%s: schema %q is not in the allowed list: %s", tool, schema, strings.Join(allowedSchemas, ", "))
 		}
 	}
 

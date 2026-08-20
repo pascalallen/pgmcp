@@ -61,8 +61,11 @@ type ExplainOut struct {
 var explainOutputSchema = mustExplainOutputSchema()
 
 // Explain returns the plan for a single read-only statement, diffing it
-// against an earlier plan when asked.
-func Explain(d diagnostics.Diagnostics, p sqlguard.Parser) (*mcp.Tool, mcp.ToolHandlerFor[ExplainIn, ExplainOut]) {
+// against an earlier plan when asked. Every statement is validated by
+// sqlguard before it reaches the port and — when the server was started with
+// a schema allowlist — every table it names must live in one of the allowed
+// schemas, because analyze=true executes the statement.
+func Explain(d diagnostics.Diagnostics, p sqlguard.Parser, allowedSchemas []string) (*mcp.Tool, mcp.ToolHandlerFor[ExplainIn, ExplainOut]) {
 	tool := &mcp.Tool{
 		Name:         "explain",
 		Description:  "Plans one read-only statement and reports the plan tree, the nodes burning the most self time, plan warnings and a stable plan_hash. Use it to answer why a specific query is slow; set analyze=true to actually run the statement and collect real row counts and timings. Pass compare_to with a plan_hash from an earlier call to diff the two plan shapes after a change.",
@@ -73,6 +76,10 @@ func Explain(d diagnostics.Diagnostics, p sqlguard.Parser) (*mcp.Tool, mcp.ToolH
 	handler := func(ctx context.Context, _ *mcp.CallToolRequest, in ExplainIn) (*mcp.CallToolResult, ExplainOut, error) {
 		if err := sqlguard.Validate(in.SQL, p); err != nil {
 			return nil, ExplainOut{}, sanitizeRejection(err)
+		}
+
+		if err := checkSchemas("explain", in.SQL, p, allowedSchemas); err != nil {
+			return nil, ExplainOut{}, err
 		}
 
 		buffers := true

@@ -50,7 +50,7 @@ func TestExplain(t *testing.T) {
 			called = true
 
 			return seqScanPlan("abc", 0), nil
-		}}, parser)
+		}}, parser, nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "UPDATE orders SET total = 0"})
 		require.Error(t, err)
@@ -66,7 +66,7 @@ func TestExplain(t *testing.T) {
 
 		parser := fakeParser{err: errors.New(`syntax error at or near "SELCT" in SELCT * FROM salaries`)}
 
-		_, handler := Explain(fakeDiag{}, parser)
+		_, handler := Explain(fakeDiag{}, parser, nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELCT * FROM salaries"})
 		require.Error(t, err)
@@ -88,7 +88,7 @@ func TestExplain(t *testing.T) {
 				Reason: sqlguard.ReasonParse,
 				Detail: `syntax error at or near "SELCT" in SELCT * FROM salaries`,
 			}
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELCT * FROM salaries"})
 		require.Error(t, err)
@@ -107,7 +107,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return nil, &sqlguard.Rejection{Reason: sqlguard.ReasonFunction, Detail: "pg_sleep"}
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT pg_sleep(10)"})
 		require.Error(t, err)
@@ -123,7 +123,7 @@ func TestExplain(t *testing.T) {
 			received = p
 
 			return seqScanPlan("abc", 12), nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1", Analyze: true})
 		require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestExplain(t *testing.T) {
 			received = p
 
 			return seqScanPlan("abc", 0), nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1", Analyze: true, Buffers: ptr(false)})
 		require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestExplain(t *testing.T) {
 				Warnings:    []string{"Sequential scan over large relation orders"},
 				PlanHash:    "deadbeefdeadbeef",
 			}, nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, out, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM orders"})
 		require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return &diagnostics.ExplainResult{Plan: diagnostics.PlanNode{NodeType: "Result"}, PlanHash: "abc"}, nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, out, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1"})
 		require.NoError(t, err)
@@ -214,7 +214,7 @@ func TestExplain(t *testing.T) {
 			call++
 
 			return plan, nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM orders WHERE id = 1"})
 		require.NoError(t, err)
@@ -236,7 +236,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return seqScanPlan("hash-seq", 5), nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, out, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1", CompareTo: "never-stored"})
 		require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return seqScanPlan("fresh", 1), nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, out, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1", CompareTo: "stale"})
 		require.NoError(t, err)
@@ -310,7 +310,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return nil, failure
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1"})
 		require.ErrorIs(t, err, failure)
@@ -321,7 +321,7 @@ func TestExplain(t *testing.T) {
 
 		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
 			return nil, nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT 1"})
 		require.EqualError(t, err, "explain: diagnostics returned no plan")
@@ -345,7 +345,7 @@ func TestExplain(t *testing.T) {
 				Warnings:    []string{"Sequential scan over large relation orders"},
 				PlanHash:    "deadbeefdeadbeef",
 			}, nil
-		}}, selectParser())
+		}}, selectParser(), nil)
 
 		session := serveTool(t, definition, handler)
 
@@ -367,7 +367,7 @@ func TestExplain(t *testing.T) {
 
 		parser := fakeParser{statement: &sqlguard.Statement{Kinds: []string{"SelectStmt"}, NodeTypes: map[string]bool{"LockingClause": true}}}
 
-		definition, handler := Explain(fakeDiag{}, parser)
+		definition, handler := Explain(fakeDiag{}, parser, nil)
 
 		session := serveTool(t, definition, handler)
 
@@ -375,5 +375,90 @@ func TestExplain(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 		assert.Contains(t, contentText(result), "locking_clause_not_allowed")
+	})
+}
+
+func TestExplainSchemaAllowlist(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("explain lets any schema through when no allowlist is configured", func(t *testing.T) {
+		resetPlanCache(t)
+
+		called := false
+
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			called = true
+
+			return seqScanPlan("abc", 1), nil
+		}}, schemaParser("pg_catalog"), nil)
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM pg_catalog.pg_class", Analyze: true})
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("explain accepts a statement whose schemas are all allowed", func(t *testing.T) {
+		resetPlanCache(t)
+
+		called := false
+
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			called = true
+
+			return seqScanPlan("abc", 1), nil
+		}}, schemaParser("public"), []string{"public"})
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM public.orders"})
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("explain analyze of a table outside the allowlist never reaches the port", func(t *testing.T) {
+		resetPlanCache(t)
+
+		called := false
+
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			called = true
+
+			return seqScanPlan("abc", 1), nil
+		}}, schemaParser("pg_catalog"), []string{"public"})
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM pg_catalog.pg_class", Analyze: true})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `explain: schema "pg_catalog" is not in the allowed list`)
+		assert.Contains(t, err.Error(), "public")
+		assert.NotContains(t, err.Error(), "pg_class", "the error names the schema, never the statement")
+		assert.False(t, called, "analyze must not execute the statement against a disallowed schema")
+	})
+
+	t.Run("explain rejects an unqualified table reference while an allowlist is configured", func(t *testing.T) {
+		resetPlanCache(t)
+
+		called := false
+
+		_, handler := Explain(fakeDiag{explain: func(context.Context, diagnostics.ExplainParams) (*diagnostics.ExplainResult, error) {
+			called = true
+
+			return seqScanPlan("abc", 1), nil
+		}}, schemaParser(""), []string{"public"})
+
+		_, _, err := handler(ctx, nil, ExplainIn{SQL: "SELECT * FROM orders"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "schema-qualify every table reference")
+		assert.False(t, called, "the port must not be reached for an unqualified reference")
+	})
+
+	t.Run("explain reports a disallowed schema as a tool error over an mcp session", func(t *testing.T) {
+		resetPlanCache(t)
+
+		definition, handler := Explain(fakeDiag{}, schemaParser("pg_catalog"), []string{"public"})
+
+		session := serveTool(t, definition, handler)
+
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "explain", Arguments: ExplainIn{SQL: "SELECT * FROM pg_catalog.pg_class", Analyze: true}})
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, contentText(result), `schema "pg_catalog" is not in the allowed list`)
 	})
 }

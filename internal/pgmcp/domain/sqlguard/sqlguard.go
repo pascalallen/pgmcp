@@ -78,7 +78,7 @@ var DeniedFunctions = []string{
 // DeniedFunctionPrefixes are lowercase function-name prefixes Validate
 // rejects, covering whole families of functions rather than single names.
 var DeniedFunctionPrefixes = []string{
-	"dblink", "pg_advisory", "pg_try_advisory", "pg_ls_", "pg_logical_",
+	"dblink", "pg_advisory", "pg_try_advisory", "pg_ls_", "pg_file_", "pg_logical_",
 	"pg_replication_origin_", "pg_create_logical_replication_slot",
 	"pg_create_physical_replication_slot", "pg_drop_replication_slot", "pg_copy_",
 }

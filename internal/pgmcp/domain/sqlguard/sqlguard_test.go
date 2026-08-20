@@ -247,6 +247,17 @@ func TestValidate(t *testing.T) {
 			wantDetailHas: "dblink_exec",
 		},
 		{
+			name: "rejects select pg_file_write('x','y',false) by prefix match",
+			parser: newFakeParser(sql, &sqlguard.Statement{
+				Kinds:     []string{"SelectStmt"},
+				NodeTypes: map[string]bool{"SelectStmt": true},
+				Functions: []string{"pg_file_write"},
+			}),
+			wantErr:       true,
+			wantReason:    sqlguard.ReasonFunction,
+			wantDetailHas: "pg_file_write",
+		},
+		{
 			name: "rejects an uppercase PG_SLEEP call case-insensitively",
 			parser: newFakeParser(sql, &sqlguard.Statement{
 				Kinds:     []string{"SelectStmt"},
