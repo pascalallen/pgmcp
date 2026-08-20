@@ -312,6 +312,7 @@ func TestQuerySchemaAllowlist(t *testing.T) {
 		_, _, err := handler(ctx, nil, QueryIn{SQL: "SELECT * FROM orders"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "schema-qualify every table reference")
+		assert.Contains(t, err.Error(), "inline it as a subquery instead", "qualifying a cte name is impossible, so the advice must not suggest it")
 		assert.Contains(t, err.Error(), "public")
 		assert.False(t, called, "the port must not be reached for an unqualified reference")
 	})
