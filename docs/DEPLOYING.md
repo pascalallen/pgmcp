@@ -161,6 +161,12 @@ pgmcp.example.com {
 		# The Streamable HTTP transport keeps an SSE stream open; without this
 		# Caddy buffers the response and the client sees nothing until the end.
 		flush_interval -1
+
+		# Caddy forwards the original Host by default. The SDK's DNS-rebinding
+		# protection rejects a request that arrives on a loopback address with a
+		# non-loopback Host header, so the public hostname has to be rewritten
+		# to the upstream's or every request comes back 403.
+		header_up Host {upstream_hostport}
 	}
 }
 ```
@@ -172,10 +178,16 @@ location / {
 	proxy_pass http://127.0.0.1:8080;
 	proxy_http_version 1.1;
 	proxy_set_header Connection "";
+	proxy_set_header Host $proxy_host; # nginx's default; keep it — see the Caddy note
 	proxy_buffering off;      # same reason as Caddy's flush_interval
 	proxy_read_timeout 3600s; # an idle SSE stream is not a dead one
 }
 ```
+
+Whatever proxy you use, the `Host` reaching pgmcp must be the loopback upstream
+while pgmcp is bound to loopback. `proxy_set_header Host $host` — a very common
+line to copy in — passes the public hostname through and turns every MCP request
+into a 403.
 
 Three endpoints are exposed:
 
