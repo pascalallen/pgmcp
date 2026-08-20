@@ -40,11 +40,34 @@ jobs:
     # namespaces; it mints a token from this workflow's identity, so there is
     # no publishing secret to store.
     permissions: { contents: read, id-token: write }
+    # This job holds id-token: write, which is enough to publish anything under
+    # io.github.pascalallen/*. The tool that does the publishing is therefore
+    # pinned to a tag and checksum-verified rather than pulled from
+    # "releases/latest": an unpinned download hands that capability to whatever
+    # happens to be newest upstream at the moment the tag is cut.
+    #
+    # To bump, change this one version, then confirm the asset and checksum
+    # file names for the new tag with
+    #   gh release view <tag> -R modelcontextprotocol/registry
+    # The checksum file is named for the version without its leading "v"
+    # (v1.8.1 -> registry_1.8.1_checksums.txt) and covers the mcp-publisher
+    # assets as well as the registry ones.
+    env: { MCP_PUBLISHER_VERSION: "v1.8.1" }
     steps:
       - uses: actions/checkout@v5
       - name: Install mcp-publisher
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          asset="mcp-publisher_linux_amd64.tar.gz"
+          sums="registry_${MCP_PUBLISHER_VERSION#v}_checksums.txt"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o "$sums" "$base/$sums"
+          # Fail closed: the asset must appear exactly once in the checksum
+          # file and its hash must match, both before anything is unpacked.
+          grep " ${asset}\$" "$sums" > asset.sha256
+          test "$(wc -l < asset.sha256)" -eq 1
+          sha256sum -c asset.sha256
+          tar xzf "$asset" mcp-publisher
           ./mcp-publisher --version
       - name: Pin server.json to the tag
         # goreleaser's {{ .Version }} is the tag without its leading "v", so
