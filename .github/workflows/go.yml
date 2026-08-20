@@ -1,0 +1,29 @@
+name: Go
+on: { push: { branches: [main] }, pull_request: { branches: [main] } }
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy: { fail-fast: false, matrix: { go: ["1.25.x", "stable"] } }
+    env: { CGO_ENABLED: "0", PGMCP_TEST_DSN: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "${{ matrix.go }}", check-latest: true }
+      - name: Start Postgres (pg_stat_statements preloaded)
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16 -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
+          for i in $(seq 1 30); do docker exec pg pg_isready -U postgres && break; sleep 1; done
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Staticcheck
+        if: matrix.go == 'stable'
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: Test
+        env: { CGO_ENABLED: "1" }
+        run: go test -race -cover ./...
+      - name: Vulnerability check
+        if: matrix.go == 'stable'
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
