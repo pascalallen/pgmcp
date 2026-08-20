@@ -34,3 +34,46 @@ jobs:
       - name: Vulnerability check
         if: matrix.go == 'stable'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  # Drives the server through the official MCP conformance suite over the same
+  # Streamable HTTP transport a real client uses. Auth is off, which the config
+  # loader only permits because the listen address is loopback.
+  #
+  # The suite's fixture-dependent scenarios cannot pass against a real server;
+  # .github/conformance-expected-failures.yaml is the baseline that scopes them,
+  # and the runner still fails the job on any failure outside that list or on
+  # any baselined scenario that starts passing.
+  conformance:
+    runs-on: ubuntu-latest
+    env: { CGO_ENABLED: "0" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "stable", check-latest: true }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Start Postgres (pg_stat_statements preloaded)
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16 -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
+          for i in $(seq 1 30); do docker exec pg pg_isready -U postgres && break; sleep 1; done
+      - name: Install pg_stat_statements
+        run: |
+          for i in $(seq 1 30); do docker exec pg psql -U postgres -c "SELECT 1" >/dev/null 2>&1 && break; sleep 1; done
+          docker exec pg psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
+      - name: Build
+        run: go build -o /tmp/pgmcp ./cmd/pgmcp
+      - name: Serve over http and wait for readiness
+        env:
+          PGMCP_DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+          PGMCP_AUTH_MODE: none
+        # Detached with its output redirected: a background process that still
+        # holds the step's stdout would keep the step from ever finishing.
+        run: |
+          nohup /tmp/pgmcp --transport http --listen 127.0.0.1:8080 >/tmp/pgmcp.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/healthz
+      - name: Conformance
+        run: npx -y @modelcontextprotocol/conformance server --url http://127.0.0.1:8080/mcp --expected-failures .github/conformance-expected-failures.yaml
+      - name: Server log
+        if: always()
+        run: cat /tmp/pgmcp.log

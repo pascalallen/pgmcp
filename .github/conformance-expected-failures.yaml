@@ -1,0 +1,71 @@
+# Baseline of MCP conformance scenarios pgmcp is expected to fail.
+#
+# The suite drives a server through the reference fixtures its own test
+# server implements: a tool literally named test_simple_text, a resource at
+# test://static-text, a prompt named test-simple, and so on. pgmcp is a real
+# Postgres diagnostics server, not the reference server, so every scenario
+# that reaches for one of those fixtures fails with "unknown tool" or
+# "Resource not found". Implementing them would mean shipping fake tools in a
+# production catalogue, which is worse than a documented baseline.
+#
+# The scenarios that test protocol behaviour rather than fixtures — the
+# handshake, tools/list, resources/list, prompts/list, ping, logging/setLevel,
+# SSE streams and DNS-rebinding protection — are NOT in this list and must
+# keep passing.
+#
+# The runner exits non-zero on any failure outside this list AND on any entry
+# here that starts passing (a stale baseline), so this file cannot silently
+# hide a regression or rot.
+#
+# Regenerate the reason for an entry with:
+#   npx -y @modelcontextprotocol/conformance server \
+#     --url http://127.0.0.1:8080/mcp --scenario <name> --verbose
+server:
+  # Requires the completions capability plus a ref/prompt fixture to complete
+  # against. pgmcp declares no completions capability.
+  - completion-complete
+
+  # Each requires a fixture tool: test_simple_text, test_image, test_audio,
+  # test_embedded_resource, test_mixed_content, test_logging, test_error,
+  # test_progress, test_sampling, test_elicitation. pgmcp's catalogue is the
+  # nine Postgres diagnostics tools and nothing else.
+  - tools-call-simple-text
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-logging
+  - tools-call-error
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+
+  # Elicitation is a client->user round trip. A read-only diagnostics server
+  # never prompts an operator mid-call, so it neither declares nor exercises
+  # the capability.
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+
+  # Require the test:// resource fixtures (static text, static binary, a
+  # template) and resource subscriptions. pgmcp serves two live pg:// resources
+  # and does not implement subscribe/unsubscribe: its resources are snapshots
+  # of a database, with no change feed to subscribe to.
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe
+  - resources-unsubscribe
+
+  # Require the test prompt fixtures. pgmcp ships one prompt,
+  # diagnose_slow_query, and prompts-list (which validates its shape) passes.
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+
+  # WARNING, not a hard failure: the scenario wants an Mcp-Session-Id to open a
+  # second SSE stream against. pgmcp runs the Streamable HTTP transport
+  # stateless by design (no sessions, no EventStore), so there is no session ID
+  # to hand out. The runner treats a warning as a failure for baseline
+  # purposes, so it is listed here.
+  - server-sse-multiple-streams

@@ -1,0 +1,128 @@
+# goreleaser builds every released artifact: six binaries, their archives, a
+# checksum file, and the multi-arch ghcr.io image the MCP Registry points at.
+#
+# {{ .Version }} is the tag with its leading "v" stripped, so tag v1.0.0
+# produces ghcr.io/pascalallen/pgmcp:1.0.0 — the exact identifier server.json
+# declares.
+#
+# Verify locally without publishing anything:
+#   goreleaser check
+#   goreleaser release --snapshot --clean --skip=publish,docker
+version: 2
+
+project_name: pgmcp
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: pgmcp
+    main: ./cmd/pgmcp
+    binary: pgmcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # Pin the binary's embedded timestamp to the commit so a rebuild of the
+    # same tag is byte-identical.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: pgmcp
+    ids:
+      - pgmcp
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+changelog:
+  use: github
+
+# One image per architecture, then a manifest list joining them. The registry
+# verifies OCI ownership by reading io.modelcontextprotocol.server.name off
+# the image, so that label must match server.json's "name" exactly.
+dockers:
+  - id: pgmcp-linux-amd64
+    ids:
+      - pgmcp
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    image_templates:
+      - "ghcr.io/pascalallen/pgmcp:{{ .Version }}-amd64"
+      - "ghcr.io/pascalallen/pgmcp:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=io.modelcontextprotocol.server.name=io.github.pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Read-only Postgres ops/DBA diagnostics: slow queries, EXPLAIN, locks, index and table health."
+      - "--label=org.opencontainers.image.source=https://github.com/pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.url=https://github.com/pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+  - id: pgmcp-linux-arm64
+    ids:
+      - pgmcp
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    image_templates:
+      - "ghcr.io/pascalallen/pgmcp:{{ .Version }}-arm64"
+      - "ghcr.io/pascalallen/pgmcp:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=io.modelcontextprotocol.server.name=io.github.pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Read-only Postgres ops/DBA diagnostics: slow queries, EXPLAIN, locks, index and table health."
+      - "--label=org.opencontainers.image.source=https://github.com/pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.url=https://github.com/pascalallen/pgmcp"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/pascalallen/pgmcp:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/pascalallen/pgmcp:{{ .Version }}-amd64"
+      - "ghcr.io/pascalallen/pgmcp:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/pascalallen/pgmcp:latest"
+    image_templates:
+      - "ghcr.io/pascalallen/pgmcp:latest-amd64"
+      - "ghcr.io/pascalallen/pgmcp:latest-arm64"
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Container image
+
+    ```
+    docker pull ghcr.io/pascalallen/pgmcp:{{ .Version }}
+    ```
