@@ -1,0 +1,115 @@
+//go:build wireinject
+// +build wireinject
+
+package container
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+
+	"github.com/google/wire"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/pascalallen/pgmcp/internal/pgmcp/application/mcp/tool"
+	"github.com/pascalallen/pgmcp/internal/pgmcp/infrastructure/config"
+	httpserver "github.com/pascalallen/pgmcp/internal/pgmcp/infrastructure/http"
+	"github.com/pascalallen/pgmcp/internal/pgmcp/infrastructure/logger"
+	mcpserver "github.com/pascalallen/pgmcp/internal/pgmcp/infrastructure/mcp"
+	"github.com/pascalallen/pgmcp/internal/pgmcp/infrastructure/postgres"
+)
+
+// provideConfig resolves the runtime configuration from CLI flags and the
+// environment. A failure here is an operator error, and main reports it with
+// its own exit code.
+func provideConfig(args []string, getenv func(string) string) (*config.Config, error) {
+	cfg, err := config.Load(args, getenv)
+	if err != nil {
+		return nil, &ConfigError{Err: err}
+	}
+
+	return cfg, nil
+}
+
+// provideLogger builds the structured logger. It writes to stderr, never
+// stdout: over the stdio transport stdout carries the JSON-RPC stream, and a
+// log line written there would corrupt the protocol.
+func provideLogger(cfg *config.Config) *slog.Logger {
+	return logger.New(os.Stderr, cfg.LogLevel, cfg.LogFormat)
+}
+
+// provideStore opens the read-only Postgres adapter. Its cleanup closes the
+// pool.
+func provideStore(ctx context.Context, cfg *config.Config, log *slog.Logger) (*postgres.Store, func(), error) {
+	store, err := postgres.Open(ctx, cfg.DatabaseURL, cfg.MaxConns, cfg.CallTimeout, log)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return store, func() { _ = store.Close() }, nil
+}
+
+// provideMCPServer assembles the MCP server over the Postgres adapter. The
+// transport matters to it: rate limiting is only installed for HTTP, where
+// callers are remote and plural.
+func provideMCPServer(cfg *config.Config, store *postgres.Store, log *slog.Logger, version string) *mcp.Server {
+	return mcpserver.New(mcpserver.Params{
+		Version:         version,
+		Diag:            store,
+		Parser:          postgres.Parser{},
+		Log:             log,
+		CallTimeout:     cfg.CallTimeout,
+		RateLimitPerMin: cfg.RateLimitPerMin,
+		MaxOutputBytes:  cfg.MaxOutputBytes,
+		Tools: tool.Options{
+			DisableQuery: cfg.DisableQuery,
+			QuerySchemas: cfg.QuerySchemas,
+		},
+		HTTP: cfg.Transport == config.TransportHTTP,
+	})
+}
+
+// provideHTTPHandler builds the HTTP surface, or nothing at all when the
+// configured transport is stdio. The returned cleanup bounds the background
+// JWKS refresh the JWT auth mode starts, so it is always non-nil.
+func provideHTTPHandler(ctx context.Context, cfg *config.Config, server *mcp.Server, store *postgres.Store, log *slog.Logger) (http.Handler, func(), error) {
+	if cfg.Transport != config.TransportHTTP {
+		return nil, func() {}, nil
+	}
+
+	handler, shutdown, err := httpserver.NewHandler(ctx, server, httpserver.Options{
+		Listen:         cfg.Listen,
+		ResourceURL:    cfg.ResourceURL,
+		AuthMode:       cfg.AuthMode,
+		APIKeys:        cfg.APIKeys,
+		JWKSURL:        cfg.JWKSURL,
+		JWTIssuer:      cfg.JWTIssuer,
+		JWTAudience:    cfg.JWTAudience,
+		AuthServers:    cfg.AuthServers,
+		InsecureNoAuth: cfg.InsecureNoAuth,
+		Log:            log,
+		Health:         store.Ping,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return handler, shutdown, nil
+}
+
+// InitializeContainer wires the whole application. The returned cleanup
+// releases every resource the container holds, in reverse construction
+// order; callers must defer it whenever the error is nil.
+func InitializeContainer(ctx context.Context, args []string, getenv func(string) string, version string) (*Container, func(), error) {
+	wire.Build(
+		provideConfig,
+		provideLogger,
+		provideStore,
+		provideMCPServer,
+		provideHTTPHandler,
+		wire.Struct(new(Container), "*"),
+	)
+
+	return nil, nil, nil
+}
