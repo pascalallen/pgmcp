@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: write, packages: write }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         # goreleaser derives the changelog from the commit range since the
         # previous tag, so it needs the whole history, not a shallow clone.
         with: { fetch-depth: 0 }
@@ -54,7 +54,7 @@ jobs:
     # assets as well as the registry ones.
     env: { MCP_PUBLISHER_VERSION: "v1.8.1" }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install mcp-publisher
         run: |
           asset="mcp-publisher_linux_amd64.tar.gz"

@@ -10,7 +10,7 @@ jobs:
     strategy: { fail-fast: false, matrix: { go: ["1.25.x", "stable"] } }
     env: { CGO_ENABLED: "0", PGMCP_TEST_DSN: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with: { go-version: "${{ matrix.go }}", check-latest: true }
       - name: Start Postgres (pg_stat_statements preloaded)
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     env: { CGO_ENABLED: "0" }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with: { go-version: "stable", check-latest: true }
       - uses: actions/setup-node@v4
