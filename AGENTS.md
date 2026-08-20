@@ -24,6 +24,14 @@ npx -y @modelcontextprotocol/conformance server --url http://127.0.0.1:8080/mcp 
   --expected-failures .github/conformance-expected-failures.yaml
 ```
 
+The release pipeline — six binaries, the darwin universal binary, the Claude
+Desktop bundle, checksums — can be run end to end without publishing (needs
+Node for the pinned `@anthropic-ai/mcpb` CLI):
+
+```bash
+go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean --skip=publish,docker
+```
+
 ## Invariants — keep the tests that pin them
 
 Each line is a property the codebase must not lose. If a change makes one of
@@ -69,6 +77,7 @@ these tests fail, the change is wrong until proven otherwise.
 - Slices in a tool output are empty, never null: plan children, hot nodes and warnings, columns and rows, and the parser's own slices — pinned by `TestExplain`, `TestQuery` (`application/mcp/tool`) and `TestParserNeverReturnsNilSlices` (`infrastructure/postgres`).
 - The domain result types marshal the JSON keys the tool output schemas are derived from — pinned by `TestExplainResultMarshalsExpectedTopLevelKeys` and `TestIndexHealthResultMarshalsExpectedTopLevelKeys` (`domain/diagnostics`).
 - A configuration error exits 2 and a runtime failure exits 1 — pinned by `TestCommandStartup` (`cmd/pgmcp`).
+- The Claude Desktop bundle (`mcpb/manifest.json`) lists exactly the tools the catalogue registers with the same descriptions, launches `server/pgmcp` (`server/pgmcp.exe` on win32) over stdio, takes the DSN as a required sensitive `user_config` field, and sets no environment variable that is not a `PGMCP_*` key fed from `user_config` — pinned by `TestBundleManifest` (`application/mcp/tool`).
 
 ## Design decisions
 
@@ -89,4 +98,5 @@ these tests fail, the change is wrong until proven otherwise.
 - Integration tests gate on `PGMCP_TEST_DSN`; `t.Skip` when unset.
 - Workflow: GitHub Issue → `feature/<issue#>-<slug>` → PR referencing the issue. **Agents never merge.** No `Co-Authored-By` trailers. Commit subjects imperative, reference issue `(#n)`.
 - `wire_gen.go` is generated (`go generate ./internal/pgmcp/infrastructure/container/...`), never hand-edited.
+- Distribution is one `.mcpb` bundle for Claude Desktop (darwin universal + windows/amd64; the MCPB manifest selects by OS, not architecture, and Desktop has no Linux build), packed by `scripts/mcpb-pack.sh` from the `universal_binaries` post hook — the last goreleaser stage before archives/checksums/publish. Unsigned on purpose. The `@anthropic-ai/mcpb` CLI is pinned in the script, not watched by Dependabot. `server.json`'s committed MCPB `fileSha256` is an all-zero placeholder that `release.yml` replaces from the published asset; CI refuses to publish the placeholder.
 - Licence MIT `Copyright (c) 2026 Pascal Allen`. README follows the pubsub/pgqueue shape (6 badges, Installation, Usage, Testing, Contributing, License).

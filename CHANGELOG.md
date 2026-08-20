@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Claude Desktop bundle, `pgmcp_<version>.mcpb`, on every release: one file
+  for macOS (universal binary) and Windows (x64) that installs with a double
+  click and keeps the connection string in the OS keychain. `server.json` now
+  declares it as an MCPB package next to the OCI image, and the publish job
+  hashes the published asset into `fileSha256` (#42).
+
 ## [1.0.0] - 2026-08-20
 
 ### Added
