@@ -18,6 +18,7 @@ type Statement struct {
 	Kinds     []string        // top-level statement node names, e.g. "SelectStmt", "UpdateStmt"
 	NodeTypes map[string]bool // every node-type key seen anywhere in the tree ("LockingClause", "IntoClause", "DeleteStmt", …)
 	Functions []string        // every called function name, lowercase, last path segment ("pg_sleep", "now")
+	Schemas   []string        // every schema qualifying a table reference, as parsed; "" for an unqualified reference
 }
 
 // Parser parses a raw SQL string into a Statement summary.

@@ -36,10 +36,11 @@ var embeddedNodeFields = map[string]string{
 }
 
 // Parse parses sql and summarises the resulting tree: the top-level statement
-// kinds in source order, every node type seen anywhere in the tree, and every
+// kinds in source order, every node type seen anywhere in the tree, every
 // called function name lowercased and reduced to its last path segment
 // (so "pg_catalog.pg_terminate_backend" is reported as
-// "pg_terminate_backend").
+// "pg_terminate_backend"), and the schema qualifying every table reference
+// (the empty string for an unqualified one).
 func (Parser) Parse(sql string) (*sqlguard.Statement, error) {
 	raw, err := pg_query.ParseToJSON(sql)
 	if err != nil {
@@ -55,6 +56,7 @@ func (Parser) Parse(sql string) (*sqlguard.Statement, error) {
 		Kinds:     make([]string, 0),
 		NodeTypes: make(map[string]bool),
 		Functions: make([]string, 0),
+		Schemas:   make([]string, 0),
 	}
 
 	statements, _ := tree["stmts"].([]any)
@@ -72,13 +74,22 @@ func (Parser) Parse(sql string) (*sqlguard.Statement, error) {
 		}
 	}
 
-	functions := make(map[string]bool)
-	walkNode(tree, stmt.NodeTypes, functions)
+	walk := treeWalk{
+		nodeTypes: stmt.NodeTypes,
+		functions: make(map[string]bool),
+		schemas:   make(map[string]bool),
+	}
+	walk.node(tree)
 
-	for name := range functions {
+	for name := range walk.functions {
 		stmt.Functions = append(stmt.Functions, name)
 	}
 	sort.Strings(stmt.Functions)
+
+	for schema := range walk.schemas {
+		stmt.Schemas = append(stmt.Schemas, schema)
+	}
+	sort.Strings(stmt.Schemas)
 
 	return stmt, nil
 }
@@ -101,36 +112,65 @@ func soleNodeType(wrapper map[string]any) string {
 	return keys[0]
 }
 
-// walkNode records every node type and every called function reachable from
-// node.
-func walkNode(node any, nodeTypes map[string]bool, functions map[string]bool) {
-	switch value := node.(type) {
+// treeWalk accumulates what one pass over a parse tree learns: the node types
+// it contains, the functions it calls, and the schemas its table references
+// are qualified with.
+type treeWalk struct {
+	nodeTypes map[string]bool
+	functions map[string]bool
+	schemas   map[string]bool
+}
+
+// node records every node type, called function and table schema reachable
+// from n.
+func (w treeWalk) node(n any) {
+	switch value := n.(type) {
 	case map[string]any:
 		for key, child := range value {
+			nodeType := ""
 			switch {
 			case nodeTypePattern.MatchString(key):
-				nodeTypes[key] = true
+				nodeType = key
+				w.nodeTypes[key] = true
 			default:
 				if embedded, ok := embeddedNodeFields[key]; ok {
 					if _, isObject := child.(map[string]any); isObject {
-						nodeTypes[embedded] = true
+						nodeType = embedded
+						w.nodeTypes[embedded] = true
 					}
 				}
 			}
-			if key == "FuncCall" {
-				if call, ok := child.(map[string]any); ok {
-					if name := functionName(call); name != "" {
-						functions[name] = true
+			if object, ok := child.(map[string]any); ok {
+				switch nodeType {
+				case "FuncCall":
+					if name := functionName(object); name != "" {
+						w.functions[name] = true
+					}
+				case "RangeVar":
+					if schema, isTable := rangeVarSchema(object); isTable {
+						w.schemas[schema] = true
 					}
 				}
 			}
-			walkNode(child, nodeTypes, functions)
+			w.node(child)
 		}
 	case []any:
 		for _, child := range value {
-			walkNode(child, nodeTypes, functions)
+			w.node(child)
 		}
 	}
+}
+
+// rangeVarSchema returns the schema qualifying a RangeVar table reference —
+// the empty string when the reference is unqualified — and whether the node
+// really is a table reference at all.
+func rangeVarSchema(node map[string]any) (string, bool) {
+	if _, named := node["relname"].(string); !named {
+		return "", false
+	}
+	schema, _ := node["schemaname"].(string)
+
+	return schema, true
 }
 
 // functionName returns the lowercased last segment of a FuncCall's funcname
