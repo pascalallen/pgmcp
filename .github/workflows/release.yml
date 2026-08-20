@@ -1,0 +1,85 @@
+name: Release
+# Tagging is the only trigger: v1.0.0 on main cuts the GitHub release, pushes
+# the ghcr.io image, and publishes the manifest to the MCP Registry.
+on:
+  push: { tags: ["v*"] }
+permissions: { contents: read }
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions: { contents: write, packages: write }
+    steps:
+      - uses: actions/checkout@v5
+        # goreleaser derives the changelog from the commit range since the
+        # previous tag, so it needs the whole history, not a shallow clone.
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v6
+        with: { go-version: "stable", check-latest: true }
+      # linux/arm64 images are cross-built on an amd64 runner.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: goreleaser/goreleaser-action@v6
+        with: { version: "~> v2", args: "release --clean" }
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+  # Publishes server.json to registry.modelcontextprotocol.io. It runs after
+  # release because the registry verifies OCI ownership by reading the
+  # io.modelcontextprotocol.server.name label off the published image, so the
+  # image has to exist — and be publicly readable — first. See
+  # docs/DEPLOYING.md for the one-time package-visibility step and the manual
+  # fallback if this job fails.
+  publish-registry:
+    needs: release
+    runs-on: ubuntu-latest
+    # github-oidc is the registry's supported headless login for io.github.*
+    # namespaces; it mints a token from this workflow's identity, so there is
+    # no publishing secret to store.
+    permissions: { contents: read, id-token: write }
+    # This job holds id-token: write, which is enough to publish anything under
+    # io.github.pascalallen/*. The tool that does the publishing is therefore
+    # pinned to a tag and checksum-verified rather than pulled from
+    # "releases/latest": an unpinned download hands that capability to whatever
+    # happens to be newest upstream at the moment the tag is cut.
+    #
+    # To bump, change this one version, then confirm the asset and checksum
+    # file names for the new tag with
+    #   gh release view <tag> -R modelcontextprotocol/registry
+    # The checksum file is named for the version without its leading "v"
+    # (v1.8.1 -> registry_1.8.1_checksums.txt) and covers the mcp-publisher
+    # assets as well as the registry ones.
+    env: { MCP_PUBLISHER_VERSION: "v1.8.1" }
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install mcp-publisher
+        run: |
+          asset="mcp-publisher_linux_amd64.tar.gz"
+          sums="registry_${MCP_PUBLISHER_VERSION#v}_checksums.txt"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o "$sums" "$base/$sums"
+          # Fail closed: the asset must appear exactly once in the checksum
+          # file and its hash must match, both before anything is unpacked.
+          grep " ${asset}\$" "$sums" > asset.sha256
+          test "$(wc -l < asset.sha256)" -eq 1
+          sha256sum -c asset.sha256
+          tar xzf "$asset" mcp-publisher
+          ./mcp-publisher --version
+      - name: Pin server.json to the tag
+        # goreleaser's {{ .Version }} is the tag without its leading "v", so
+        # the image tag written here matches the one the release job pushed.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v | .packages[0].identifier = "ghcr.io/pascalallen/pgmcp:" + $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+          cat server.json
+      - name: Validate server.json
+        run: ./mcp-publisher validate server.json
+      - name: Log in to the MCP Registry
+        run: ./mcp-publisher login github-oidc
+      - name: Publish
+        run: ./mcp-publisher publish

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pascalallen/pgmcp",
+  "title": "pgmcp",
+  "description": "Read-only Postgres ops/DBA diagnostics: slow queries, EXPLAIN, locks, index and table health.",
+  "repository": {
+    "url": "https://github.com/pascalallen/pgmcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "websiteUrl": "https://github.com/pascalallen/pgmcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/pascalallen/pgmcp:1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PGMCP_DATABASE_URL",
+          "description": "Postgres connection string (read-only role recommended)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

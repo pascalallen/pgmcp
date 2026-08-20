@@ -1,0 +1,22 @@
+# The image goreleaser builds at release time. It copies the binary
+# goreleaser has already cross-compiled rather than compiling from source, so
+# the released artifact and the released image are the same bytes.
+#
+# The repo's Dockerfile stays the from-source multi-stage build compose uses
+# for local development; the two are deliberately separate.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+# The MCP Registry verifies ownership of an OCI package by reading this label
+# and matching it against the "name" in server.json. It is baked in here as
+# well as passed via --label from .goreleaser.yaml so that every per-arch
+# image carries it even if a build is run by hand.
+LABEL io.modelcontextprotocol.server.name="io.github.pascalallen/pgmcp"
+LABEL org.opencontainers.image.source="https://github.com/pascalallen/pgmcp"
+LABEL org.opencontainers.image.licenses="MIT"
+
+COPY pgmcp /pgmcp
+
+# stdio is the default transport, which is what an MCP client launching this
+# image as a subprocess expects. An HTTP deployment overrides it with
+# --transport http (or PGMCP_TRANSPORT=http).
+ENTRYPOINT ["/pgmcp"]
