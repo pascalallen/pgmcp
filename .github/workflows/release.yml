@@ -17,7 +17,7 @@ jobs:
         with: { go-version: "stable", check-latest: true }
       # scripts/mcpb-pack.sh runs the @anthropic-ai/mcpb CLI (pinned there)
       # from a goreleaser hook to pack the Claude Desktop bundle.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "22" }
       # linux/arm64 images are cross-built on an amd64 runner.
       - uses: docker/setup-qemu-action@v3
